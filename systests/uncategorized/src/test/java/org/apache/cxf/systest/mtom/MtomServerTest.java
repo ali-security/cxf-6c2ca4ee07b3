@@ -170,6 +170,9 @@ public class MtomServerTest extends AbstractBusClientServerTestBase {
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         IOUtils.copy(is, bout);
         String s = bout.toString("UTF-8");
+        // xop:Include href must be a "cid:" URI (RFC 2392); URLs inside it are only followed
+        // when org.apache.cxf.attachment.xop.follow.urls=true (set for these tests in the pom)
+        s = s.replaceAll("href='http://localhost:9036/", "href='cid:http://localhost:9036/");
         s = s.replaceAll(":9036/", ":" + PORT2 + "/");
 
         os.write(s.getBytes("UTF-8"));
