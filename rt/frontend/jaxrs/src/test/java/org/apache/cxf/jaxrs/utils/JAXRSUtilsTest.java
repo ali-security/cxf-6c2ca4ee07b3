@@ -55,6 +55,7 @@ import javax.ws.rs.ext.ParamConverterProvider;
 import javax.ws.rs.ext.Providers;
 import javax.xml.bind.JAXBContext;
 
+import org.apache.cxf.BusFactory;
 import org.apache.cxf.endpoint.Endpoint;
 import org.apache.cxf.endpoint.Server;
 import org.apache.cxf.helpers.CastUtils;
@@ -116,6 +117,10 @@ public class JAXRSUtilsTest extends Assert {
     @After
     public void tearDown() {
         AbstractResourceInfo.clearAllMaps();
+        // Drop the shared default Bus so each test gets a fresh DestinationRegistry:
+        // null-address servers get a random ephemeral port, and a port reused by the
+        // OS otherwise collides with an earlier test's destination on the same Bus.
+        BusFactory.setDefaultBus(null);
     }
     
     @Test
