@@ -861,5 +861,97 @@ public class AttachmentDeserializerTest extends Assert {
             .getAttachmentDataSource("cid:http%3A%2F%2Fimage.com%2F1.gif", Collections.<Attachment>emptyList());
         assertThat(ds, instanceOf(LazyDataSource.class));
     }
+
+    @Test
+    public void testManyAttachments() throws Exception {
+        final StringBuilder sb = new StringBuilder(1000);
+        sb.append("SomeHeader: foo\n")
+            .append("------=_Part_34950_1098328613.1263781527359\n")
+            .append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n");
+
+        // Add many attachments
+        for (int i = 0; i < 100000; i++) {
+            sb.append("------=_Part_34950_1098328613.1263781527359\n")
+                .append("Content-Type: text/xml\n")
+                .append("Content-Transfer-Encoding: binary\n")
+                .append("Content-Id: <b86a5f2d-e7af-4e5e-b71a-9f6f2307cab0>\n")
+                .append('\n')
+                .append("<message>\n")
+                .append("------=_Part_34950_1098328613.1263781527359--\n");
+        }
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        // Force it to load the attachments
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on too many attachments");
+        } catch (RuntimeException ex) {
+            // expected
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+            assertEquals("The message contains more attachments than are permitted",
+                         ex.getCause().getMessage());
+        }
+    }
+
+    @Test
+    public void testChangingMaxAttachmentCount() throws Exception {
+        final StringBuilder sb = new StringBuilder(1000);
+        sb.append("SomeHeader: foo\n")
+            .append("------=_Part_34950_1098328613.1263781527359\n")
+            .append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n");
+
+        // Add many attachments
+        for (int i = 0; i < 40; i++) {
+            sb.append("------=_Part_34950_1098328613.1263781527359\n")
+                .append("Content-Type: text/xml\n")
+                .append("Content-Transfer-Encoding: binary\n")
+                .append("Content-Id: <b86a5f2d-e7af-4e5e-b71a-9f6f2307cab0>\n")
+                .append('\n')
+                .append("<message>\n")
+                .append("------=_Part_34950_1098328613.1263781527359--\n");
+        }
+
+        msg = new MessageImpl();
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_COUNT, "30");
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        // Force it to load the attachments
+        try {
+            msg.getAttachments().size();
+            fail("Failure expected on too many attachments");
+        } catch (RuntimeException ex) {
+            // expected
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+            assertEquals("The message contains more attachments than are permitted",
+                         ex.getCause().getMessage());
+        }
+
+        // Now we'll allow it
+        msg = new MessageImpl();
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_COUNT, "60");
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        // Force it to load the attachments
+        assertEquals(40, msg.getAttachments().size());
+    }
 }
 
