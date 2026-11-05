@@ -19,6 +19,8 @@
 
 package org.apache.cxf.systest.jaxws;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -41,8 +43,10 @@ import java.util.logging.Logger;
 import java.util.zip.GZIPInputStream;
 
 import javax.xml.namespace.QName;
+import javax.xml.transform.stream.StreamSource;
 import javax.xml.ws.AsyncHandler;
 import javax.xml.ws.BindingProvider;
+import javax.xml.ws.Dispatch;
 import javax.xml.ws.Endpoint;
 import javax.xml.ws.Response;
 import javax.xml.ws.Service;
@@ -60,7 +64,12 @@ import org.apache.cxf.configuration.security.AuthorizationPolicy;
 import org.apache.cxf.endpoint.Client;
 import org.apache.cxf.endpoint.dynamic.DynamicClientFactory;
 import org.apache.cxf.frontend.ClientProxy;
+import org.apache.cxf.helpers.FileUtils;
 import org.apache.cxf.helpers.XPathUtils;
+import org.apache.cxf.io.CachedOutputStream;
+import org.apache.cxf.io.CachedOutputStreamCleaner;
+import org.apache.cxf.io.DelayedCachedOutputStreamCleaner;
+import org.apache.cxf.jaxws.DispatchImpl;
 import org.apache.cxf.message.Message;
 import org.apache.cxf.staxutils.StaxUtils;
 import org.apache.cxf.testutil.common.AbstractBusClientServerTestBase;
@@ -108,9 +117,9 @@ public class ClientServerTest extends AbstractBusClientServerTestBase {
     public static void startServers() throws Exception {                    
         // set up configuration to enable schema validation
         URL url = ClientServerTest.class.getResource("fault-stack-trace.xml");
+        createStaticBus(url.toString());
         assertNotNull("cannot find test resource", url);
         assertTrue("server did not launch correctly", launchServer(Server.class, true));
-        createStaticBus(url.toString());
     }
     
     @Test
@@ -1057,4 +1066,40 @@ public class ClientServerTest extends AbstractBusClientServerTestBase {
         assertEquals("Hello World", resp);
     }
 
+    @Test
+    public void testEchoProviderThresholdTimeout() throws Exception {
+        final File f = FileUtils.createTmpDir();
+        LOG.info("Using temp folder: " + f.getAbsolutePath());
+
+        System.setProperty("org.apache.cxf.io.CachedOutputStream.OutputDirectory", f.getAbsolutePath());
+        CachedOutputStream.setDefaultThreshold(5);
+
+        String requestString = "<echo/>";
+        Service service = Service.create(serviceName);
+        service.addPort(fakePortName, javax.xml.ws.soap.SOAPBinding.SOAP11HTTP_BINDING,
+                        "http://localhost:" + PORT + "/SoapContext/AsyncEchoProvider");
+        Dispatch<StreamSource> dispatcher = service.createDispatch(fakePortName,
+                                                                   StreamSource.class,
+                                                                   Service.Mode.PAYLOAD);
+        dispatcher.getRequestContext().put("javax.xml.ws.client.receiveTimeout", "1000");
+        dispatcher.getRequestContext().put("javax.xml.ws.client.connectionTimeout", "1000");
+
+        StreamSource request = new StreamSource(new ByteArrayInputStream(requestString.getBytes()));
+        try {
+            StreamSource response = dispatcher.invoke(request);
+            assertEquals(requestString, StaxUtils.toString(response));
+        } catch (final WebServiceException ex) {
+            ((DispatchImpl<StreamSource>)dispatcher).getClient().destroy();
+        }
+
+        if (f.list().length > 0) {
+            final CachedOutputStreamCleaner cleaner = getBus().getExtension(CachedOutputStreamCleaner.class);
+            if (cleaner instanceof DelayedCachedOutputStreamCleaner) {
+                ((DelayedCachedOutputStreamCleaner) cleaner).forceClean();
+            }
+        }
+
+        assertEquals("Expected no files but there is at list one", 0, f.list().length);
+        FileUtils.removeDir(f);
+    }
 }
