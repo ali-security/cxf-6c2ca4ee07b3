@@ -23,12 +23,15 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
 
 import javax.xml.namespace.QName;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import javax.xml.stream.events.XMLEvent;
@@ -362,6 +365,128 @@ public class StaxUtilsTest extends Assert {
             fail("invalid qname in mapping");
         } catch (Exception e) {
             // ignore
+        }
+    }
+
+    @Test
+    public void testDefaultMaxElementCount() throws Exception {
+        // Every element stays below the default maxChildElements (50000) and maxElementDepth (100),
+        // but the whole document holds more than 5 million elements (100 * maxChildElements)
+        XMLStreamReader reader = StaxUtils.createXMLStreamReader(
+            new RepeatingReader("<root>", "<g>" + repeat("<e/>", 40000) + "</g>", 131, "</root>"));
+        long limit = 100L * 50000;
+        // Woodstox 4.2.x reports this limit as "Maximum Element Count Exceeded" (without the value),
+        // so also check that the reader stopped at the default limit
+        long elements = assertLimitExceeded(reader, String.valueOf(limit), "Maximum Element Count");
+        assertTrue("Reader stopped after " + elements + " elements, expected the limit " + limit,
+                   elements >= limit - 1 && elements <= limit);
+    }
+
+    @Test
+    public void testDefaultMaxXMLCharacters() throws Exception {
+        // Every text node stays below the default maxTextLength (128M characters),
+        // but the whole document holds more than 256M characters
+        XMLStreamReader reader = StaxUtils.createXMLStreamReader(
+            new RepeatingReader("<root>", "<t>" + repeat("a", 1024 * 1024) + "</t>", 260, "</root>"));
+        assertLimitExceeded(reader, String.valueOf(256 * 1024 * 1024), null);
+    }
+
+    @Test
+    public void testDocumentBelowDefaultLimits() throws Exception {
+        XMLStreamReader reader = StaxUtils.createXMLStreamReader(
+            new RepeatingReader("<root>", "<g>" + repeat("<e>a</e>", 1000) + "</g>", 100, "</root>"));
+        int elements = 0;
+        while (reader.hasNext()) {
+            if (reader.next() == XMLStreamConstants.START_ELEMENT) {
+                elements++;
+            }
+        }
+        reader.close();
+        assertEquals(1 + 100 * 1001, elements);
+    }
+
+    private static long assertLimitExceeded(XMLStreamReader reader, String limit, String limitName)
+        throws XMLStreamException {
+        long elements = 0;
+        try {
+            while (reader.hasNext()) {
+                if (reader.next() == XMLStreamConstants.START_ELEMENT) {
+                    elements++;
+                }
+            }
+            fail("Document should have been rejected, limit " + limit + " was not enforced");
+        } catch (XMLStreamException ex) {
+            assertLimitMessage(ex, limit, limitName);
+        } catch (RuntimeException ex) {
+            assertLimitMessage(ex, limit, limitName);
+        } finally {
+            reader.close();
+        }
+        return elements;
+    }
+
+    private static void assertLimitMessage(Exception ex, String limit, String limitName) {
+        StringBuilder messages = new StringBuilder();
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            messages.append(t.getMessage()).append('\n');
+        }
+        String msg = messages.toString();
+        assertTrue("Unexpected failure: " + messages,
+                   msg.contains("limit (" + limit + ")") || (limitName != null && msg.contains(limitName)));
+    }
+
+    private static String repeat(String s, int count) {
+        StringBuilder sb = new StringBuilder(s.length() * count);
+        for (int i = 0; i < count; i++) {
+            sb.append(s);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Streams prefix + count * body + suffix without materializing the whole document.
+     */
+    private static final class RepeatingReader extends Reader {
+        private final String body;
+        private String suffix;
+        private int remaining;
+        private String current;
+        private int pos;
+
+        RepeatingReader(String prefix, String body, int count, String suffix) {
+            this.current = prefix;
+            this.body = body;
+            this.remaining = count;
+            this.suffix = suffix;
+        }
+
+        @Override
+        public int read(char[] cbuf, int off, int len) {
+            if (len == 0) {
+                return 0;
+            }
+            while (current != null && pos >= current.length()) {
+                pos = 0;
+                if (remaining > 0) {
+                    remaining--;
+                    current = body;
+                } else {
+                    current = suffix;
+                    suffix = null;
+                }
+            }
+            if (current == null) {
+                return -1;
+            }
+            int n = Math.min(len, current.length() - pos);
+            current.getChars(pos, pos + n, cbuf, off);
+            pos += n;
+            return n;
+        }
+
+        @Override
+        public void close() {
+            // nothing to release
         }
     }
 }
