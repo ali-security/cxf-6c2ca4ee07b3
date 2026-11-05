@@ -29,6 +29,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -846,6 +847,86 @@ public class AttachmentDeserializerTest extends Assert {
         assertEquals(3, headers.size());
         assertEquals("text/xml;\r\n charset=UTF-8", headers.get("content-type").get(0));
         assertEquals("UTF-8", msg.get(Message.ENCODING));
+    }
+
+    private static String createMessage(String headers) {
+        StringBuilder sb = new StringBuilder(10000);
+        sb.append("------=_Part_34950_1098328613.1263781527359\n");
+        sb.append(headers);
+        sb.append("Content-Type: text/xml; charset=UTF-8\n")
+            .append("Content-Transfer-Encoding: binary\n")
+            .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02>\n")
+            .append('\n')
+            .append("<envelope/>\n");
+        return sb.toString();
+    }
+
+    private static String randomLetters(Random random, int length) {
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append((char)('a' + random.nextInt('z' - 'a')));
+        }
+        return sb.toString();
+    }
+
+    private void initializeAttachmentsExpectingHeaderSizeExceeded(String message) throws Exception {
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class, new ByteArrayInputStream(message.getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected large header value");
+        } catch (HeaderSizeExceededException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentHeaderSize() throws Exception {
+        final Random random = new Random();
+        initializeAttachmentsExpectingHeaderSizeExceeded(
+            createMessage("Header:" + randomLetters(random, 500) + "\n"));
+    }
+
+    @Test
+    public void testManyAttachmentRepeatedHeaders() throws Exception {
+        StringBuilder headers = new StringBuilder(10000);
+        for (int h = 1; h <= 6; h++) {
+            for (int i = 0; i < 100; i++) {
+                headers.append("Header").append(h).append(": ").append(i).append('\n');
+            }
+        }
+
+        msg = new MessageImpl();
+        msg.setContent(InputStream.class,
+            new ByteArrayInputStream(createMessage(headers.toString()).getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+
+        try {
+            ad.initializeAttachments();
+            fail("Failure expected on too many attachment headers");
+        } catch (IOException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testAttachmentRepeatedHeaderSize() throws Exception {
+        final Random random = new Random();
+        initializeAttachmentsExpectingHeaderSizeExceeded(
+            createMessage("Header:" + randomLetters(random, 200) + "\n"
+                + "Header:" + randomLetters(random, 200) + "\n"));
+    }
+
+    @Test
+    public void testAttachmentMultiLineHeaderSize() throws Exception {
+        final Random random = new Random();
+        initializeAttachmentsExpectingHeaderSizeExceeded(
+            createMessage("Header:" + randomLetters(random, 200) + "\n"
+                + "\t" + randomLetters(random, 200) + "\n"));
     }
 
     private static String createMessageWithHeaders(int count) {
