@@ -82,7 +82,7 @@ final class AttachmentDeserializerUtil {
         String line;
         int totalHeadersCollected = 0;
         // loop until we hit the end or a null line
-        while ((line = readLine(in)) != null) {
+        while ((line = readLine(in, maxHeaderLength)) != null) {
             // lines beginning with white space get special handling
             if (line.startsWith(" ") || line.startsWith("\t")) {
                 // If this line is a continuation, but there's nothing before it,
@@ -125,7 +125,7 @@ final class AttachmentDeserializerUtil {
         return heads;
     }
 
-    private static String readLine(InputStream in) throws IOException {
+    private static String readLine(InputStream in, int maxHeaderLength) throws IOException {
         StringBuffer buffer = new StringBuffer(128);
 
         int c;
@@ -141,6 +141,12 @@ final class AttachmentDeserializerUtil {
             } else {
                 // just add to the buffer
                 buffer.append((char)c);
+            }
+
+            if (buffer.length() > maxHeaderLength) {
+                LOG.fine("The attachment header size has exceeded the configured parameter: "
+                    + maxHeaderLength);
+                throw new HeaderSizeExceededException();
             }
         }
 
