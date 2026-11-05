@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.activation.DataHandler;
 import javax.activation.DataSource;
 import javax.activation.URLDataSource;
 import javax.xml.parsers.SAXParser;
@@ -860,6 +861,94 @@ public class AttachmentDeserializerTest extends Assert {
         ds = AttachmentUtil
             .getAttachmentDataSource("cid:http%3A%2F%2Fimage.com%2F1.gif", Collections.<Attachment>emptyList());
         assertThat(ds, instanceOf(LazyDataSource.class));
+    }
+
+    @Test
+    public void testManyAttachmentsIterator() throws Exception {
+        prepareManyAttachmentsForStreaming();
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        Iterator<Attachment> it = msg.getAttachments().iterator();
+        try {
+            while (it.hasNext()) {
+                it.next();
+            }
+            fail("Failure expected on too many attachments via for-each");
+        } catch (RuntimeException ex) {
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+        }
+
+        final LazyAttachmentCollection attachments = (LazyAttachmentCollection) msg.getAttachments();
+        try {
+            attachments.add(new AttachmentImpl("contentId"));
+            fail("Failure expected on too many attachments via add()");
+        } catch (RuntimeException ex) {
+            // expected
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+        }
+        try {
+            attachments.addAll(Collections.singletonList(new AttachmentImpl("contentId")));
+            fail("Failure expected on too many attachments via addAll()");
+        } catch (RuntimeException ex) {
+            // expected
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    @Test
+    public void testManyAttachmentsHasNext() throws Exception {
+        prepareManyAttachmentsForStreaming();
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        final LazyAttachmentCollection attachments = (LazyAttachmentCollection) msg.getAttachments();
+        int loaded = 0;
+        try {
+            while (attachments.hasNext()) {
+                // force loading
+                loaded++;
+            }
+            fail("Failure expected on too many attachments via hasNext(), loaded " + loaded);
+        } catch (IOException ex) {
+            // expected
+        }
+    }
+
+    @Test
+    public void testManyAttachmentsDataHandlerIterator() throws Exception {
+        prepareManyAttachmentsForStreaming();
+        AttachmentDeserializer ad = new AttachmentDeserializer(msg);
+        ad.initializeAttachments();
+
+        final LazyAttachmentCollection attachments = (LazyAttachmentCollection) msg.getAttachments();
+        try {
+            for (Map.Entry<String, DataHandler> entry : attachments.createDataHandlerMap().entrySet()) {
+                entry.getValue(); // force loading
+            }
+            fail("Failure expected on too many attachments via createDataHandlerMap()");
+        } catch (RuntimeException ex) {
+            assertThat(ex.getCause(), instanceOf(IOException.class));
+        }
+    }
+
+    private void prepareManyAttachmentsForStreaming() throws Exception {
+        StringBuilder sb = new StringBuilder(250000);
+        for (int i = 0; i < 60; i++) {
+            sb.append("------=_Part_34950_1098328613.1263781527359\n")
+                .append("Content-Type: text/xml; charset=UTF-8\n")
+                .append("Content-Transfer-Encoding: binary\n")
+                .append("Content-Id: <318731183421.1263781527359.IBM.WEBSERVICES@auhpap02.")
+                .append(i).append(">\n")
+                .append('\n')
+                .append("<envelope/>\n");
+        }
+        sb.append("------=_Part_34950_1098328613.1263781527359--\n");
+
+        msg = new MessageImpl();
+        msg.put(AttachmentDeserializer.ATTACHMENT_MAX_COUNT, "50");
+        msg.setContent(InputStream.class, new ByteArrayInputStream(sb.toString().getBytes("UTF-8")));
+        msg.put(Message.CONTENT_TYPE, "multipart/related");
     }
 
     @Test
